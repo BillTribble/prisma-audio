@@ -1,0 +1,341 @@
+[
+  {
+    "id": "gemini3",
+    "name": "Gemini 3.0 (Omni)",
+    "year": 2026,
+    "era": "The Omni Era",
+    "type": "Multimodal",
+    "desc": "The first truly native Omni-model. Sees, hears, and speaks as one. (Simulation)",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Weaver",
+        "file": "crystals/gemini3/structure_layers.ply",
+        "desc": "Text, Audio, and Video layers woven together."
+      }
+    ]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek-V3 (MoE)",
+    "year": 2025,
+    "era": "The Sparse Era",
+    "type": "MoE",
+    "desc": "A massive 671B parameter Mixture-of-Experts model. Famous for extreme efficiency via sparsity.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Sparse Cloud",
+        "file": "crystals/deepseek/structure_layers.ply",
+        "desc": "DeepSeek-V3 / R1 Structure. Visualizing the massive sparsity (MoE)."
+      }
+    ]
+  },
+  {
+    "id": "gpt4",
+    "name": "GPT-4",
+    "year": 2023,
+    "era": "The Scale Era",
+    "type": "MoE",
+    "desc": "The model that changed the world. Massive scale, massive capability. (Simulation)",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Colossus",
+        "file": "crystals/gpt4/structure_layers.ply",
+        "desc": "A towering 120-layer MoE helix."
+      }
+    ]
+  },
+  {
+    "id": "smollm",
+    "name": "SmolLM2 (360M)",
+    "year": 2025,
+    "era": "The Edge AI Era",
+    "type": "Mobile",
+    "desc": "The future is small. Running powerful intelligence locally on your phone.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Pocket Brain",
+        "file": "crystals/smollm/structure_layers.ply",
+        "desc": "Highly optimized compact layers."
+      }
+    ]
+  },
+  {
+    "id": "qwen25",
+    "name": "Qwen 2.5 (1.5B)",
+    "year": 2024,
+    "era": "Reasoning & Agency",
+    "type": "CoT Decoder",
+    "desc": "The reasoning engine. Capable of complex multi-step logic and planning.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Logic Core",
+        "file": "crystals/qwen25/structure_layers.ply",
+        "desc": "Dense, optimized circuitry for reasoning."
+      },
+      {
+        "id": "cot",
+        "name": "Thought: Step-by-Step",
+        "file": "crystals/qwen25/activation_cot.ply",
+        "desc": "'Let's think step by step' [Reasoning Path]"
+      }
+    ]
+  },
+  {
+    "id": "gemma2",
+    "name": "Gemma 2 (2B)",
+    "year": 2024,
+    "era": "Open Weights Revolution",
+    "type": "Dense Decoder",
+    "desc": "Google's open model. Highly efficient knowledge compression.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "Obsidian Monolith",
+        "file": "crystals/gemma2/structure_layers.ply",
+        "desc": "Dense obsidian-like lattice."
+      }
+    ]
+  },
+  {
+    "id": "tinyllama",
+    "name": "TinyLlama 1.1B",
+    "year": 2023,
+    "era": "Efficient AI",
+    "type": "Decoder",
+    "desc": "Compact brilliance. Trained on 3 Trillion tokens to prove small models can be smart.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "Compressed Knowledge",
+        "file": "crystals/tinyllama/activation_consciousness.ply",
+        "desc": "'Consciousness is a strange loop'"
+      }
+    ]
+  },
+  {
+    "id": "clip",
+    "name": "CLIP (ViT-B/32)",
+    "year": 2021,
+    "era": "Multimodal Bridge",
+    "type": "Multimodal",
+    "desc": "The bridge between Vision and Language. Two architectures (Visual + Text) side-by-side.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Twin Spires",
+        "file": "crystals/clip/structure_layers.ply",
+        "desc": "Twin towers converging."
+      }
+    ]
+  },
+  {
+    "id": "t5",
+    "name": "T5 (Small)",
+    "year": 2020,
+    "era": "Text-to-Text Unification",
+    "type": "Enc-Dec",
+    "desc": "The Universal Transformer. Treating every problem as text-to-text.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Hourglass",
+        "file": "crystals/t5/structure_layers.ply",
+        "desc": "The Hourglass architecture."
+      }
+    ]
+  },
+  {
+    "id": "gpt2",
+    "name": "GPT-2 (Small)",
+    "year": 2019,
+    "era": "Generative Beginnings",
+    "type": "Decoder",
+    "desc": "The model that demonstrated unsupervised language generation capabilities at scale.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Creative Helix",
+        "file": "crystals/gpt2/structure_solid.ply",
+        "desc": "The full 12-layer helix tower."
+      },
+      {
+        "id": "spectrum",
+        "name": "Layer Spectrum",
+        "file": "crystals/gpt2/structure_layers.ply",
+        "desc": "Colored by depth (Input to Output)."
+      },
+      {
+        "id": "future",
+        "name": "Thought: Future",
+        "file": "crystals/gpt2/activation_future.ply",
+        "desc": "'The future is vast and infinite'..."
+      },
+      {
+        "id": "quantum",
+        "name": "Thought: Quantum",
+        "file": "crystals/gpt2/activation_quantum.ply",
+        "desc": "'Quantum physics is confusing'..."
+      }
+    ]
+  },
+  {
+    "id": "bert",
+    "name": "BERT Base",
+    "year": 2018,
+    "era": "The Transformer Era",
+    "type": "Encoder",
+    "desc": "Bidirectional representation from Transformers. The reading engine of the internet.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Stability Pillar",
+        "file": "crystals/bert/structure_layers.ply",
+        "desc": "Symmetrical column of 12 layers."
+      },
+      {
+        "id": "fox",
+        "name": "Analysis: Linguistic Context",
+        "file": "crystals/bert/activation_quick_brown_fox.ply",
+        "desc": "'The quick brown fox' [Parallel processing]"
+      }
+    ]
+  },
+  {
+    "id": "mobilenet",
+    "name": "MobileNetV2",
+    "year": 2018,
+    "era": "The Efficiency Era",
+    "type": "CNN",
+    "desc": "The first truly efficient mobile vision model.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Spider Web",
+        "file": "crystals/mobilenet/structure_layers.ply",
+        "desc": "Sparse, efficient connectivity."
+      }
+    ]
+  },
+  {
+    "id": "resnet",
+    "name": "ResNet-50",
+    "year": 2015,
+    "era": "The Deep Learning Boom",
+    "type": "CNN",
+    "desc": "The model that solved the vanishing gradient problem with skip connections, allowing for deep networks.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Deep Pyramid",
+        "file": "crystals/resnet/structure_layers.ply",
+        "desc": "50 Layers expanding from 64 to 2048 channels."
+      },
+      {
+        "id": "cat",
+        "name": "Perception: Feline Features",
+        "file": "crystals/resnet/activation_cat.ply",
+        "desc": "Processing 'cat.jpg' - Visual Noise to Concept."
+      }
+    ]
+  },
+  {
+    "id": "vgg16",
+    "name": "VGG-16",
+    "year": 2014,
+    "era": "The Deep Tower",
+    "type": "CNN",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Monolith",
+        "file": "crystals/vgg16/structure_layers.ply",
+        "desc": "A rigid tower of convolutional blocks."
+      }
+    ]
+  },
+  {
+    "id": "inception",
+    "name": "GoogleNet (Inception)",
+    "year": 2014,
+    "era": "The Branching Path",
+    "type": "CNN",
+    "desc": "Wide, parallel processing. Introducing complexity through the 'Inception Module'.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Lattice",
+        "file": "crystals/inception/structure_layers.ply",
+        "desc": "Parallel branches crystallizing together."
+      }
+    ]
+  },
+  {
+    "id": "alexnet",
+    "name": "AlexNet",
+    "year": 2012,
+    "era": "The Spark",
+    "type": "CNN",
+    "desc": "The model that ignited the Deep Learning revolution. Winning ImageNet 2012 by a landslide.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Deep Stack",
+        "file": "crystals/alexnet/structure_layers.ply",
+        "desc": "5 Convolutional Layers."
+      }
+    ]
+  },
+  {
+    "id": "word2vec",
+    "name": "Word2Vec",
+    "year": 2013,
+    "era": "The Vector Era",
+    "type": "Embedding",
+    "desc": "The model that taught computers the meaning of words. King - Man + Woman = Queen.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Prism",
+        "file": "crystals/word2vec/structure.ply",
+        "desc": "Compressing vocabulary into meaning vectors."
+      }
+    ]
+  },
+  {
+    "id": "lenet",
+    "name": "LeNet-5",
+    "year": 1998,
+    "era": "The Origin",
+    "type": "CNN",
+    "desc": "The ancestor. A tiny 5-layer network that learned to read digits. The spark that started it all.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The First Spark",
+        "file": "crystals/lenet/structure.ply",
+        "desc": "Hand-crafted layers. Simple, effective, beautiful."
+      }
+    ]
+  },
+  {
+    "id": "perceptron",
+    "name": "The Perceptron",
+    "year": 1958,
+    "era": "Prehistory",
+    "type": "Linear",
+    "desc": "The single neuron that started it all. Frank Rosenblatt's Mark I Perceptron.",
+    "crystals": [
+      {
+        "id": "struct",
+        "name": "The Atom",
+        "file": "crystals/perceptron/structure.ply",
+        "desc": "A single linear plane. The limit of 1-layer computing."
+      }
+    ]
+  }
+]
