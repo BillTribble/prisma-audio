@@ -137,7 +137,7 @@ export class CrystalViewer {
     this.xorWire = null;
     this.xorPercentage = 0.02;
 
-    this.baseSize = 0.04;
+    this.baseSize = 0.2;
     this.lfoAmount = 0.2;
     this.lfoSpeed = 3.5;
 
@@ -1116,48 +1116,92 @@ export class CrystalViewer {
     const allIndices = [];
 
     const totalSamples = dataL.length;
-    const targetPoints = 15000;
-    const step = Math.floor(totalSamples / targetPoints);
+    // Reduce target points to keep total vertex count reasonable with 8 segments/step
+    // 2000 steps * 8 vertices = 16,000 vertices (similar to previous 15,000)
+    const targetSteps = 2000;
+    const step = Math.floor(totalSamples / targetSteps);
 
-    const timeScale = 0.01;
-    const ampScale = 15.0;
-    const width = 10.0;
+    const timeScale = 0.025;
+    const ampScale = 20.0;
+    const baseRadius = 0.05;
+    const segments = 8; // Octagonal rings
+
+    let previousRingStartRaw = -1;
 
     for (let i = 0; i < totalSamples; i += step) {
       if (i + step >= totalSamples) break;
 
       const x = (i / step) * timeScale;
+      // Index of the first vertex in THIS ring
+      const ringStart = positions.length / 3;
 
-      const ampL = dataL[i];
-      const ampR = dataR[i];
+      // Random rotation for this ring to prevent alignment
+      const ringRotation = Math.random() * Math.PI * 2;
 
-      // Left Node
-      positions.push(x, ampL * ampScale, -width / 2);
-      const hue = (x * 0.01) % 1.0;
-      const colorL = new THREE.Color().setHSL(hue, 1.0, 0.5);
-      colors.push(colorL.r, colorL.g, colorL.b);
+      for (let s = 0; s < segments; s++) {
+        const baseAngle = (s / segments) * Math.PI * 2;
+        const angle = baseAngle + ringRotation;
 
-      // Right Node
-      positions.push(x, ampR * ampScale, width / 2);
-      const colorR = new THREE.Color().setHSL((hue + 0.5) % 1.0, 1.0, 0.5);
-      colors.push(colorR.r, colorR.g, colorR.b);
+        // Map angle to channel: Top/Right (0..PI) uses Right, Bottom/Left (PI..2PI) uses Left
+        // Use baseAngle for channel mapping to modify consistent sides even with rotation
+        // Actually, let's mix it up - rotating the mapping creates more chaos which might be good
+        // But user asked for dynamics - consistent mapping might be better for structure.
+        // Let's stick to simple angle for now.
+        const isRight = (s < segments / 2); // Simple half-split based on index
+        let amp = isRight ? dataR[i] : dataL[i];
 
-      const idx = (i / step) * 2;
+        // Rectify amplitude for radius addition
+        amp = Math.abs(amp);
 
-      // Cross Rung (L-R)
-      allIndices.push(idx, idx + 1);
+        // "Spiky" noise component - increase noise for more jagged look
+        const spike = Math.random() * 0.6;
+        const radius = baseRadius + (amp * ampScale) + spike;
 
-      if (idx > 1) {
-        // Sequential
-        allIndices.push(idx - 2, idx);
-        allIndices.push(idx - 1, idx + 1);
+        // Jitter for organic messiness - increased
+        const jX = (Math.random() - 0.5) * 0.2;
+        const jY = (Math.random() - 0.5) * 0.2;
+        const jZ = (Math.random() - 0.5) * 0.2;
 
-        // X-Pattern
-        if (Math.abs(ampL) > 0.1 || Math.random() > 0.8) {
-          allIndices.push(idx - 2, idx + 1);
-          allIndices.push(idx - 1, idx);
+        // Convert Polar to Cartesian (YZ plane)
+        const y = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+
+        positions.push(x + jX, y + jY, z + jZ);
+
+        // Color based on time and angle
+        const hue = ((x * 0.02) + (angle / (Math.PI * 2))) % 1.0;
+        const color = new THREE.Color().setHSL(hue, 1.0, 0.5);
+        colors.push(color.r, color.g, color.b);
+      }
+
+      // Connect to previous ring
+      if (previousRingStartRaw >= 0) {
+        for (let s = 0; s < segments; s++) {
+          const currentIdx = ringStart + s;
+          const prevIdx = previousRingStartRaw + s;
+
+          const nextSeg = (s + 1) % segments;
+          const currentNextIdx = ringStart + nextSeg;
+          const prevNextIdx = previousRingStartRaw + nextSeg;
+
+          // 1. Longitudinal Rail (connects 'straight' back in time)
+          allIndices.push(prevIdx, currentIdx);
+
+          // 2. Radial Rib (connects to neighbor in same ring)
+          allIndices.push(currentIdx, currentNextIdx);
+
+          // 3. Cross/Diagonal (Webbing)
+          // Add random diagonal cross-bracing for "tunnel web" look
+          if (Math.random() > 0.4) {
+            allIndices.push(prevIdx, currentNextIdx);
+          }
+          if (Math.random() > 0.4) {
+            allIndices.push(prevNextIdx, currentIdx);
+          }
         }
       }
+
+      previousRingStartRaw = ringStart;
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -1202,108 +1246,108 @@ export class CrystalViewer {
       shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
 
       shader.vertexShader = `
-              varying float vPulse;
-              varying float vDistAlpha;
-              varying float vSeed;
-              varying float vPosX;
-              uniform float uTime;
-              uniform float uPulseEnabled;
-              uniform float uNodeNear;
-              uniform float uNodeFar;
-            ` + shader.vertexShader;
+                varying float vPulse;
+                varying float vDistAlpha;
+                varying float vSeed;
+                varying float vPosX;
+                uniform float uTime;
+                uniform float uPulseEnabled;
+                uniform float uNodeNear;
+                uniform float uNodeFar;
+              ` + shader.vertexShader;
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `
-              #include <begin_vertex>
-              vPulse = 0.0;
-              if (uPulseEnabled > 0.5) {
-                float offset = sin(position.x * 0.5) + cos(position.y * 0.5);
-                float wave = sin(position.z * 0.2 + uTime * 2.5 + offset * 0.5);
-                vPulse = smoothstep(0.9, 1.0, wave);
-              }
-              `
+                #include <begin_vertex>
+                vPulse = 0.0;
+                if (uPulseEnabled > 0.5) {
+                  float offset = sin(position.x * 0.5) + cos(position.y * 0.5);
+                  float wave = sin(position.z * 0.2 + uTime * 2.5 + offset * 0.5);
+                  vPulse = smoothstep(0.9, 1.0, wave);
+                }
+                `
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <project_vertex>',
         `
-            #include <project_vertex>
-            float dist = length(mvPosition.xyz);
-            vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
-            vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
-            vPosX = position.x;
-            gl_PointSize *= mix(0.2, 1.0, smoothstep(0.0, 15.0 * 0.5, length(position.xyz)));
-            `
+              #include <project_vertex>
+              float dist = length(mvPosition.xyz);
+              vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
+              vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+              vPosX = position.x;
+              gl_PointSize *= mix(0.2, 1.0, smoothstep(0.0, 15.0 * 0.5, length(position.xyz)));
+              `
       );
 
       shader.fragmentShader = `
-              varying float vPulse;
-              varying float vDistAlpha;
-              varying float vSeed;
-              varying float vPosX;
-              uniform float uNodeDensity;
-              uniform float uNodeSaturation;
-              uniform float uNodeOpacity;
-              uniform float uPlayX;
-              uniform float uPlayRange;
-              uniform vec3 uPalette[6];
-              
-              float getHue(vec3 rgb) {
-                float minVal = min(min(rgb.r, rgb.g), rgb.b);
-                float maxVal = max(max(rgb.r, rgb.g), rgb.b);
-                float delta = maxVal - minVal;
-                float h = 0.0;
-                if (delta > 0.0) {
-                  if (maxVal == rgb.r) h = (rgb.g - rgb.b) / delta;
-                  else if (maxVal == rgb.g) h = 2.0 + (rgb.b - rgb.r) / delta;
-                  else h = 4.0 + (rgb.r - rgb.g) / delta;
-                  h /= 6.0;
-                  if (h < 0.0) h += 1.0;
+                varying float vPulse;
+                varying float vDistAlpha;
+                varying float vSeed;
+                varying float vPosX;
+                uniform float uNodeDensity;
+                uniform float uNodeSaturation;
+                uniform float uNodeOpacity;
+                uniform float uPlayX;
+                uniform float uPlayRange;
+                uniform vec3 uPalette[6];
+                
+                float getHue(vec3 rgb) {
+                  float minVal = min(min(rgb.r, rgb.g), rgb.b);
+                  float maxVal = max(max(rgb.r, rgb.g), rgb.b);
+                  float delta = maxVal - minVal;
+                  float h = 0.0;
+                  if (delta > 0.0) {
+                    if (maxVal == rgb.r) h = (rgb.g - rgb.b) / delta;
+                    else if (maxVal == rgb.g) h = 2.0 + (rgb.b - rgb.r) / delta;
+                    else h = 4.0 + (rgb.r - rgb.g) / delta;
+                    h /= 6.0;
+                    if (h < 0.0) h += 1.0;
+                  }
+                  return h;
                 }
-                return h;
+  
+                vec3 applyPalette(vec3 rgb) {
+                  float h = getHue(rgb);
+                  float p = h * 5.0;
+                  int i = int(p);
+                  float f = fract(p);
+                  if (i == 0) return mix(uPalette[0], uPalette[1], f);
+                  if (i == 1) return mix(uPalette[1], uPalette[2], f);
+                  if (i == 2) return mix(uPalette[2], uPalette[3], f);
+                  if (i == 3) return mix(uPalette[3], uPalette[4], f);
+                  if (i == 4) return mix(uPalette[4], uPalette[5], f);
+                  return uPalette[5];
               }
-
-              vec3 applyPalette(vec3 rgb) {
-                float h = getHue(rgb);
-                float p = h * 5.0;
-                int i = int(p);
-                float f = fract(p);
-                if (i == 0) return mix(uPalette[0], uPalette[1], f);
-                if (i == 1) return mix(uPalette[1], uPalette[2], f);
-                if (i == 2) return mix(uPalette[2], uPalette[3], f);
-                if (i == 3) return mix(uPalette[3], uPalette[4], f);
-                if (i == 4) return mix(uPalette[4], uPalette[5], f);
-                return uPalette[5];
-            }
-            ` + shader.fragmentShader;
+              ` + shader.fragmentShader;
 
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         `
-              #include <color_fragment>
-              diffuseColor.rgb = applyPalette(diffuseColor.rgb);
-              float gray = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-              vec3 desaturated = vec3(gray);
-              diffuseColor.rgb = mix(desaturated, diffuseColor.rgb, uNodeSaturation * 2.0);
-              vec3 cyan = vec3(0.0, 0.9, 1.0);
-              diffuseColor.rgb = mix(diffuseColor.rgb, cyan, 0.7 * (1.1 - uNodeSaturation));
-              float fog = pow(vDistAlpha, 2.0);
-              const float uXorThreshold = 0.0115;
-              if (vSeed > uNodeDensity) discard;
-              float alphaBoost = 1.0 + (1.0 - uNodeDensity) * 4.0;
-              diffuseColor.a *= fog * alphaBoost * uNodeOpacity;
-              diffuseColor.rgb *= 1.3;
-              if (vPulse > 0.01) {
-                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 1.0, 1.0), vPulse * 0.7);
-              }
-              if (uPlayX > -9000.0) {
-                 float playDist = abs(vPosX - uPlayX);
-                 float playGlow = smoothstep(uPlayRange, 0.0, playDist);
-                 diffuseColor.rgb += vec3(1.0, 1.0, 1.0) * playGlow;
-                 diffuseColor.a = max(diffuseColor.a, playGlow);
-              }
-              `
+                #include <color_fragment>
+                diffuseColor.rgb = applyPalette(diffuseColor.rgb);
+                float gray = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+                vec3 desaturated = vec3(gray);
+                diffuseColor.rgb = mix(desaturated, diffuseColor.rgb, uNodeSaturation * 2.0);
+                vec3 cyan = vec3(0.0, 0.9, 1.0);
+                diffuseColor.rgb = mix(diffuseColor.rgb, cyan, 0.7 * (1.1 - uNodeSaturation));
+                float fog = pow(vDistAlpha, 2.0);
+                const float uXorThreshold = 0.0115;
+                if (vSeed > uNodeDensity) discard;
+                float alphaBoost = 1.0 + (1.0 - uNodeDensity) * 4.0;
+                diffuseColor.a *= fog * alphaBoost * uNodeOpacity;
+                diffuseColor.rgb *= 1.3;
+                if (vPulse > 0.01) {
+                   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 1.0, 1.0), vPulse * 0.7);
+                }
+                if (uPlayX > -9000.0) {
+                   float playDist = abs(vPosX - uPlayX);
+                   float playGlow = smoothstep(uPlayRange, 0.0, playDist);
+                   diffuseColor.rgb += vec3(1.0, 1.0, 1.0) * playGlow;
+                   diffuseColor.a = max(diffuseColor.a, playGlow);
+                }
+                `
       );
     };
 
