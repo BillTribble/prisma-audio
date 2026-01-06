@@ -199,77 +199,23 @@ function setActiveSlot(slot) {
 }
 
 async function loadGallery() {
+  // Gallery Disabled - Loading Default Audio
   try {
-    // Load Manifest
-    const res = await fetch('./crystals/manifest.json');
-    let models = await res.json();
+    const res = await fetch('./default.wav');
+    const blob = await res.blob();
+    const file = new File([blob], "default.wav", { type: "audio/wav" });
 
-    // Sort by Year (Descending: Recent -> Oldest)
-    models.sort((a, b) => b.year - a.year);
+    // Simulate file upload
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
 
-    // Setup Tags based on loaded models
-    setupTags(models);
-
-    models.forEach((model, index) => {
-      const groupDiv = document.createElement('div');
-      groupDiv.className = 'model-group';
-      // Open grouping for recent models by default? Or just first?
-      if (index === 0) groupDiv.classList.add('active');
-
-      const groupTitle = document.createElement('div');
-      groupTitle.className = 'model-title';
-      // Year | Name
-      groupTitle.innerHTML = `<span style="opacity:0.6; font-family:monospace; margin-right:8px;">${model.year}</span> ${model.name}`;
-
-      groupTitle.addEventListener('click', () => {
-        groupDiv.classList.toggle('active');
-      });
-      groupDiv.appendChild(groupTitle);
-
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'group-content';
-
-      model.crystals.forEach(crystal => {
-        const item = document.createElement('div');
-        item.className = 'crystal-item';
-        item.dataset.url = `./${crystal.file}`;
-        item.dataset.name = crystal.name;
-        item.dataset.desc = crystal.desc;
-        item.dataset.type = model.type;
-        item.dataset.year = model.year;
-        item.dataset.modelName = model.name; // Pass Model Name
-        item.dataset.modelDesc = model.desc;
-        item.dataset.modelId = model.id;
-
-        item.innerHTML = `
-                    <span class="item-name">${crystal.name}</span>
-                    <span class="item-desc">${crystal.desc.substring(0, 35)}...</span>
-                `;
-
-        item.addEventListener('click', () => {
-          document.querySelectorAll('.crystal-item').forEach(el => el.classList.remove('active'));
-          item.classList.add('active');
-          handleLoadCrystal(item.dataset, activeSlot);
-          // Close mobile menu if open
-          document.querySelector('.gallery-nav').classList.remove('active');
-        });
-
-        contentDiv.appendChild(item);
-      });
-
-      groupDiv.appendChild(contentDiv);
-      navList.appendChild(groupDiv);
-    });
-
-    // Auto-select first item
-    setTimeout(() => {
-      const firstItem = navList.querySelector('.crystal-item');
-      if (firstItem) firstItem.click();
-    }, 100);
-
-  } catch (err) {
-    console.error("Failed to load manifest:", err);
-    navList.innerHTML = `<div style="color:red; padding:1rem;">ERROR CONNECTING TO ARCHIVE<br>${err.message}</div>`;
+    const fileInput = document.getElementById('file-upload');
+    if (fileInput) {
+      fileInput.files = dataTransfer.files;
+      fileInput.dispatchEvent(new Event('change'));
+    }
+  } catch (e) {
+    console.error("Failed to load default audio", e);
   }
 }
 
@@ -891,27 +837,100 @@ if (fileInput) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const url = URL.createObjectURL(file);
-    console.log("Loading custom file:", url);
+    // Determine type
+    const ext = file.name.split('.').pop().toLowerCase();
+    const isAudio = ['mp3', 'wav', 'ogg'].includes(ext);
 
-    // Force Main View logic
-    setActiveSlot('main');
+    if (isAudio) {
+      console.log("Loading audio file:", file.name);
+      // Force Main View logic
+      setActiveSlot('main');
 
-    mainViewer.loadCrystal(url).then(stats => {
-      // Update UI
-      if (uiElements.main.superTitle) uiElements.main.superTitle.textContent = "CUSTOM UPLOAD";
-      uiElements.main.title.textContent = file.name.toUpperCase().replace('.PLY', '');
-      uiElements.main.type.textContent = "USER DATA";
-      uiElements.main.nodes.textContent = stats.nodes.toLocaleString();
-      uiElements.main.links.textContent = stats.links.toLocaleString();
-      uiElements.main.desc.innerHTML = "PREVISUALIZATION MODE<br><br>Loaded local artifact: " + file.name;
+      // Show loader
+      loader.classList.remove('hidden');
+      const loadingText = loader.querySelector('.loading-text');
+      if (loadingText) loadingText.textContent = "ANALYZING AUDIO SPECTRUM...";
 
-      // Close modal
-      if (modal) modal.classList.add('hidden');
-    }).catch(err => {
-      alert("Failed to load PLY: " + err);
-    });
+      mainViewer.loadAudio(file).then(() => {
+        // Update UI
+        if (uiElements.main.superTitle) uiElements.main.superTitle.textContent = "AUDIO VISUALIZATION";
+        uiElements.main.title.textContent = file.name;
+        uiElements.main.type.textContent = "SPECTRAL MESH";
+        uiElements.main.nodes.textContent = "DYNAMIC";
+        uiElements.main.links.textContent = "DYNAMIC";
+        uiElements.main.desc.innerHTML = "Audio data visualized as a 3D spectral network.<br>Use playback controls below.";
+
+        // Show Audio Controls
+        const audioControls = document.getElementById('audio-controls');
+        if (audioControls) audioControls.classList.remove('hidden');
+
+        // Close modal
+        const modal = document.getElementById('about-modal');
+        if (modal) modal.classList.add('hidden');
+      }).catch(err => {
+        alert("Failed to load Audio: " + err);
+      }).finally(() => {
+        loader.classList.add('hidden');
+        if (loadingText) loadingText.textContent = "DECODING NEURAL LATTICE...";
+      });
+
+    } else {
+      // PLY Logic
+      const url = URL.createObjectURL(file);
+      console.log("Loading custom file:", url);
+
+      // Force Main View logic
+      setActiveSlot('main');
+
+      mainViewer.loadCrystal(url).then(stats => {
+        // Update UI
+        if (uiElements.main.superTitle) uiElements.main.superTitle.textContent = "CUSTOM UPLOAD";
+        uiElements.main.title.textContent = file.name.toUpperCase().replace('.PLY', '');
+        uiElements.main.type.textContent = "USER DATA";
+        uiElements.main.nodes.textContent = stats.nodes.toLocaleString();
+        uiElements.main.links.textContent = stats.links.toLocaleString();
+        uiElements.main.desc.innerHTML = "PREVISUALIZATION MODE<br><br>Loaded local artifact: " + file.name;
+
+        // Close modal
+        const modal = document.getElementById('about-modal');
+        if (modal) modal.classList.add('hidden');
+      }).catch(err => {
+        alert("Failed to load PLY: " + err);
+      });
+    }
   });
+}
+
+// Audio Controls
+const btnAudioPlay = document.getElementById('btn-audio-play');
+if (btnAudioPlay) {
+  btnAudioPlay.addEventListener('click', () => {
+    if (mainViewer) {
+      const isPlaying = mainViewer.toggleAudio();
+      btnAudioPlay.textContent = isPlaying ? "PAUSE" : "PLAY";
+    }
+  });
+
+  // Update Progress Bar
+  setInterval(() => {
+    if (mainViewer && mainViewer.audioBuffer && mainViewer.isPlaying) {
+      const progress = mainViewer.getAudioProgress(); // 0..1
+      const bar = document.getElementById('audio-progress');
+      const timeDisplay = document.getElementById('audio-time');
+
+      if (bar) bar.style.width = (progress * 100) + '%';
+      if (timeDisplay) {
+        const total = mainViewer.audioBuffer.duration;
+        const current = total * progress;
+        const fmt = (t) => {
+          const m = Math.floor(t / 60);
+          const s = Math.floor(t % 60).toString().padStart(2, '0');
+          return `${m}:${s}`;
+        };
+        timeDisplay.textContent = `${fmt(current)} / ${fmt(total)}`;
+      }
+    }
+  }, 100);
 }
 
 

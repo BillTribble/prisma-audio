@@ -47,6 +47,10 @@
                                 d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z" />
                         </svg>
                     </button>
+                    <label class="minimal-btn" style="cursor:pointer;">
+                        UPLOAD DATA
+                        <input type="file" id="file-upload" accept=".ply,.mp3,.wav,.ogg" style="display:none;">
+                    </label>
                     <button id="btn-about" class="minimal-btn">ABOUT</button>
                     <button id="btn-toggle-info" class="minimal-btn">HIDE INFO</button>
                     <span class="status-dot"></span>
@@ -55,29 +59,7 @@
             </header>
 
             <!-- Left Sidebar: Gallery Navigation -->
-            <aside class="gallery-nav">
-                <div class="nav-header">
-                    <h2>MODELS</h2>
-                    <div class="nav-controls">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="compare-toggle">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="control-label">COMPARE MODE</span>
-                    </div>
-                    <div class="search-container">
-                        <input type="text" id="search-input" placeholder="SEARCH ARTIFACTS..." autocomplete="off">
-                    </div>
-
-                    <div id="filter-tags" class="filter-tags">
-                        <!-- Populated by JS -->
-                    </div>
-
-                    <div class="line-deco"></div>
-                </div>
-                <div id="model-list" class="scroll-container">
-                    <!-- Populated by JS -->
-                </div>
+            <aside class="gallery-nav" style="display:none;">
             </aside>
 
             <!-- Color Legend (Moved to global UI layer) -->
@@ -354,6 +336,13 @@
 
             <!-- Footer: Timeline / scrubber could go here later -->
             <footer class="gallery-footer">
+                <div id="audio-controls" class="audio-controls hidden">
+                    <button id="btn-audio-play" class="cyber-btn mini">PLAY</button>
+                    <div class="audio-track">
+                        <div id="audio-progress" class="audio-progress-bar"></div>
+                    </div>
+                    <span id="audio-time">00:00</span>
+                </div>
                 <div class="interaction-hint">
                     LEFT CLICK: ROTATE // RIGHT CLICK: PAN // SCROLL: ZOOM
                 </div>
@@ -393,15 +382,6 @@
 
                         <div class="upload-section"
                             style="border-top:1px solid rgba(255,255,255,0.1); padding-top:20px; margin-top:20px;">
-                            <h3 style="color:var(--color-secondary); font-size:0.9rem;">PREVISUALIZE CUSTOM CRYSTAL</h3>
-                            <p style="font-size:0.8rem; margin-bottom:10px; color:#ccc;">Upload a generated
-                                <code>.ply</code> file
-                                to view it instantly.
-                            </p>
-                            <label class="minimal-btn" style="display:inline-block; cursor:pointer; padding: 8px 16px;">
-                                UPLOAD .PLY
-                                <input type="file" id="file-upload" accept=".ply" style="display:none;">
-                            </label>
                         </div>
                     </div>
                 </div>

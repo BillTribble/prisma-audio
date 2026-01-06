@@ -57,9 +57,9 @@ export class CrystalViewer {
       uTime: { value: 0 },
       uPulseEnabled: { value: 0.0 },
       uLineNear: { value: 150.0 },
-      uLineFar: { value: 225.0 },
+      uLineFar: { value: 1000.0 },
       uNodeNear: { value: 150.0 },
-      uNodeFar: { value: 225.0 },
+      uNodeFar: { value: 1000.0 },
       uThinning: { value: 0.4 },
       uLineDensity: { value: 1.0 },
       uNodeDensity: { value: 1.0 },
@@ -76,9 +76,9 @@ export class CrystalViewer {
     // Target values for smooth lerping
     this.targetUniforms = {
       uLineNear: 150.0,
-      uLineFar: 225.0,
+      uLineFar: 1000.0,
       uNodeNear: 150.0,
-      uNodeFar: 225.0,
+      uNodeFar: 1000.0,
       uThinning: 0.4,
       uLineDensity: 1.0,
       uNodeDensity: 1.0,
@@ -142,6 +142,20 @@ export class CrystalViewer {
     this.lfoSpeed = 3.5;
 
     this.pointMaterial = null;
+
+    // Audio State
+    this.audioCtx = null;
+    this.audioBuffer = null;
+    this.audioSource = null;
+    this.isPlaying = false;
+    this.audioStartTime = 0; // When playback started relative to AudioContext.currentTime
+    this.audioPauseTime = 0; // How far into the track we were when paused
+    this.audioDuration = 0;
+
+    // Add audio-specific uniforms
+    this.customUniforms.uPlayX = { value: -9999.0 };
+    this.customUniforms.uPlayRange = { value: 5.0 };
+    this.targetUniforms.uPlayX = -9999.0;
 
     this.init();
   }
@@ -359,6 +373,27 @@ export class CrystalViewer {
 
     if (this.customUniforms) {
       this.customUniforms.uTime.value += 0.01;
+
+      // Audio Sync
+      if (this.audioBuffer && this.geometry && this.geometry.boundingBox) {
+        let progress = -1;
+        if (this.isPlaying) {
+          const t = this.audioCtx.currentTime - this.audioStartTime;
+          if (t >= this.audioDuration) {
+            this.stopAudio();
+          } else {
+            progress = t / this.audioDuration;
+          }
+        } else if (this.audioPauseTime > 0) {
+          progress = this.audioPauseTime / this.audioDuration;
+        }
+
+        if (progress >= 0) {
+          const minX = this.geometry.boundingBox.min.x;
+          const totalW = this.geometry.boundingBox.max.x - minX;
+          this.customUniforms.uPlayX.value = minX + (progress * totalW);
+        }
+      }
     }
 
     if (this.pointMaterial) {
@@ -514,11 +549,14 @@ export class CrystalViewer {
       shader.uniforms.uNodeSaturation = this.customUniforms.uNodeSaturation;
       shader.uniforms.uNodeOpacity = this.customUniforms.uNodeOpacity;
       shader.uniforms.uPalette = this.customUniforms.uPalette;
+      shader.uniforms.uPlayX = this.customUniforms.uPlayX;
+      shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
 
       shader.vertexShader = `
           varying float vPulse;
           varying float vDistAlpha;
           varying float vSeed;
+          varying float vPosX;
           uniform float uTime;
           uniform float uPulseEnabled;
           uniform float uNodeNear;
@@ -545,6 +583,7 @@ export class CrystalViewer {
         float dist = length(mvPosition.xyz);
         vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
         vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+        vPosX = position.x;
         
         // Scale point size based on distance from center
         // Nodes at center are 0.2x size, outer nodes are 1.0x size
@@ -559,9 +598,12 @@ export class CrystalViewer {
           varying float vPulse;
           varying float vDistAlpha;
           varying float vSeed;
+          varying float vPosX;
           uniform float uNodeDensity;
           uniform float uNodeSaturation;
           uniform float uNodeOpacity;
+          uniform float uPlayX;
+          uniform float uPlayRange;
           uniform vec3 uPalette[6];
           
           float getHue(vec3 rgb) {
@@ -624,6 +666,13 @@ export class CrystalViewer {
           
           if (vPulse > 0.01) {
              diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 1.0, 1.0), vPulse * 0.7);
+          }
+          
+          if (uPlayX > -9000.0) {
+             float playDist = abs(vPosX - uPlayX);
+             float playGlow = smoothstep(uPlayRange, 0.0, playDist);
+             diffuseColor.rgb += vec3(1.0, 1.0, 1.0) * playGlow;
+             diffuseColor.a = max(diffuseColor.a, playGlow);
           }
           `
       );
@@ -695,12 +744,15 @@ export class CrystalViewer {
       shader.uniforms.uLineOpacity = this.customUniforms.uLineOpacity;
       shader.uniforms.uInvertInfluence = this.customUniforms.uInvertInfluence;
       shader.uniforms.uPalette = this.customUniforms.uPalette;
+      shader.uniforms.uPlayX = this.customUniforms.uPlayX;
+      shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
 
       shader.vertexShader = `
         attribute float aLineSeed;
         varying float vDistAlpha;
         varying float vSeed;
         varying float vLineSeed;
+        varying float vPosX;
         uniform float uLineNear;
         uniform float uLineFar;
       ` + shader.vertexShader;
@@ -713,6 +765,7 @@ export class CrystalViewer {
         vDistAlpha = 1.0 - smoothstep(uLineNear, uLineFar, dist);
         vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
         vLineSeed = aLineSeed;
+        vPosX = position.x;
         `
       );
 
@@ -720,12 +773,15 @@ export class CrystalViewer {
         varying float vDistAlpha;
         varying float vSeed;
         varying float vLineSeed;
+        varying float vPosX;
         uniform float uThinning;
         uniform float uLineDensity;
         uniform float uXorThreshold;
         uniform float uColorInfluence;
         uniform float uLineOpacity;
         uniform float uInvertInfluence;
+        uniform float uPlayX;
+        uniform float uPlayRange;
         uniform vec3 uPalette[6];
 
         float getHue(vec3 rgb) {
@@ -771,6 +827,18 @@ export class CrystalViewer {
         
         // Hide if this line is in the XOR pool
         if (vLineSeed < uXorThreshold) discard;
+
+        // Playback Glow
+        if (uPlayX > -9000.0) {
+            float playDist = abs(vPosX - uPlayX);
+            // Strong white glow
+            float playGlow = smoothstep(uPlayRange, 0.0, playDist);
+            
+            // Additive boost
+            diffuseColor.rgb += vec3(1.0, 1.0, 1.0) * playGlow * 1.0;
+             // Boost alpha significantly
+            diffuseColor.a = max(diffuseColor.a, playGlow);
+        }
         `
       );
 
@@ -1006,6 +1074,301 @@ export class CrystalViewer {
   toggleAutoPan() {
     this.autoPan = !this.autoPan;
     return this.autoPan;
+  }
+
+  // Audio Methods
+  async loadAudio(file) {
+    if (this.crystalGroup) {
+      this.scene.remove(this.crystalGroup);
+      if (this.geometry) this.geometry.dispose();
+      this.crystalGroup = null;
+    }
+    this.stopAudio();
+
+    if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    const arrayBuffer = await file.arrayBuffer();
+    this.audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
+    this.audioDuration = this.audioBuffer.duration;
+
+    const { meshResult, stats } = this.parseAudio(this.audioBuffer);
+    this.crystalGroup = meshResult;
+    this.scene.add(this.crystalGroup);
+
+    this.fitCameraToSelection();
+
+    return stats;
+  }
+
+  parseAudio(buffer) {
+    const channels = buffer.numberOfChannels;
+    const dataL = buffer.getChannelData(0);
+    const dataR = channels > 1 ? buffer.getChannelData(1) : dataL;
+
+    const positions = [];
+    const colors = [];
+    const allIndices = [];
+
+    const totalSamples = dataL.length;
+    const targetPoints = 15000;
+    const step = Math.floor(totalSamples / targetPoints);
+
+    const timeScale = 0.01;
+    const ampScale = 15.0;
+    const width = 10.0;
+
+    for (let i = 0; i < totalSamples; i += step) {
+      if (i + step >= totalSamples) break;
+
+      const x = (i / step) * timeScale;
+
+      const ampL = dataL[i];
+      const ampR = dataR[i];
+
+      // Left Node
+      positions.push(x, ampL * ampScale, -width / 2);
+      const hue = (x * 0.01) % 1.0;
+      const colorL = new THREE.Color().setHSL(hue, 1.0, 0.5);
+      colors.push(colorL.r, colorL.g, colorL.b);
+
+      // Right Node
+      positions.push(x, ampR * ampScale, width / 2);
+      const colorR = new THREE.Color().setHSL((hue + 0.5) % 1.0, 1.0, 0.5);
+      colors.push(colorR.r, colorR.g, colorR.b);
+
+      const idx = (i / step) * 2;
+
+      // Cross Rung (L-R)
+      allIndices.push(idx, idx + 1);
+
+      if (idx > 1) {
+        // Sequential
+        allIndices.push(idx - 2, idx);
+        allIndices.push(idx - 1, idx + 1);
+
+        // X-Pattern
+        if (Math.abs(ampL) > 0.1 || Math.random() > 0.8) {
+          allIndices.push(idx - 2, idx + 1);
+          allIndices.push(idx - 1, idx);
+        }
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.center();
+
+    this.geometry = geometry;
+    this.allIndices = allIndices;
+
+    geometry.computeBoundingBox();
+    if (geometry.boundingBox) {
+      this.modelHeight = geometry.boundingBox.max.y - geometry.boundingBox.min.y;
+      this.modelBottom = geometry.boundingBox.min.y;
+    }
+
+    const group = new THREE.Group();
+
+    const pointMaterial = new THREE.PointsMaterial({
+      size: this.baseSize,
+      vertexColors: true,
+      transparent: true,
+      opacity: 1.0,
+      map: createCircleTexture(),
+      alphaTest: 0.001,
+      depthWrite: true,
+      blending: THREE.NormalBlending,
+      sizeAttenuation: true
+    });
+    this.pointMaterial = pointMaterial;
+
+    pointMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.customUniforms.uTime;
+      shader.uniforms.uPulseEnabled = this.customUniforms.uPulseEnabled;
+      shader.uniforms.uNodeNear = this.customUniforms.uNodeNear;
+      shader.uniforms.uNodeFar = this.customUniforms.uNodeFar;
+      shader.uniforms.uNodeDensity = this.customUniforms.uNodeDensity;
+      shader.uniforms.uNodeSaturation = this.customUniforms.uNodeSaturation;
+      shader.uniforms.uNodeOpacity = this.customUniforms.uNodeOpacity;
+      shader.uniforms.uPalette = this.customUniforms.uPalette;
+      shader.uniforms.uPlayX = this.customUniforms.uPlayX;
+      shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
+
+      shader.vertexShader = `
+              varying float vPulse;
+              varying float vDistAlpha;
+              varying float vSeed;
+              varying float vPosX;
+              uniform float uTime;
+              uniform float uPulseEnabled;
+              uniform float uNodeNear;
+              uniform float uNodeFar;
+            ` + shader.vertexShader;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `
+              #include <begin_vertex>
+              vPulse = 0.0;
+              if (uPulseEnabled > 0.5) {
+                float offset = sin(position.x * 0.5) + cos(position.y * 0.5);
+                float wave = sin(position.z * 0.2 + uTime * 2.5 + offset * 0.5);
+                vPulse = smoothstep(0.9, 1.0, wave);
+              }
+              `
+      );
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <project_vertex>',
+        `
+            #include <project_vertex>
+            float dist = length(mvPosition.xyz);
+            vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
+            vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+            vPosX = position.x;
+            gl_PointSize *= mix(0.2, 1.0, smoothstep(0.0, 15.0 * 0.5, length(position.xyz)));
+            `
+      );
+
+      shader.fragmentShader = `
+              varying float vPulse;
+              varying float vDistAlpha;
+              varying float vSeed;
+              varying float vPosX;
+              uniform float uNodeDensity;
+              uniform float uNodeSaturation;
+              uniform float uNodeOpacity;
+              uniform float uPlayX;
+              uniform float uPlayRange;
+              uniform vec3 uPalette[6];
+              
+              float getHue(vec3 rgb) {
+                float minVal = min(min(rgb.r, rgb.g), rgb.b);
+                float maxVal = max(max(rgb.r, rgb.g), rgb.b);
+                float delta = maxVal - minVal;
+                float h = 0.0;
+                if (delta > 0.0) {
+                  if (maxVal == rgb.r) h = (rgb.g - rgb.b) / delta;
+                  else if (maxVal == rgb.g) h = 2.0 + (rgb.b - rgb.r) / delta;
+                  else h = 4.0 + (rgb.r - rgb.g) / delta;
+                  h /= 6.0;
+                  if (h < 0.0) h += 1.0;
+                }
+                return h;
+              }
+
+              vec3 applyPalette(vec3 rgb) {
+                float h = getHue(rgb);
+                float p = h * 5.0;
+                int i = int(p);
+                float f = fract(p);
+                if (i == 0) return mix(uPalette[0], uPalette[1], f);
+                if (i == 1) return mix(uPalette[1], uPalette[2], f);
+                if (i == 2) return mix(uPalette[2], uPalette[3], f);
+                if (i == 3) return mix(uPalette[3], uPalette[4], f);
+                if (i == 4) return mix(uPalette[4], uPalette[5], f);
+                return uPalette[5];
+            }
+            ` + shader.fragmentShader;
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        `
+              #include <color_fragment>
+              diffuseColor.rgb = applyPalette(diffuseColor.rgb);
+              float gray = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+              vec3 desaturated = vec3(gray);
+              diffuseColor.rgb = mix(desaturated, diffuseColor.rgb, uNodeSaturation * 2.0);
+              vec3 cyan = vec3(0.0, 0.9, 1.0);
+              diffuseColor.rgb = mix(diffuseColor.rgb, cyan, 0.7 * (1.1 - uNodeSaturation));
+              float fog = pow(vDistAlpha, 2.0);
+              const float uXorThreshold = 0.0115;
+              if (vSeed > uNodeDensity) discard;
+              float alphaBoost = 1.0 + (1.0 - uNodeDensity) * 4.0;
+              diffuseColor.a *= fog * alphaBoost * uNodeOpacity;
+              diffuseColor.rgb *= 1.3;
+              if (vPulse > 0.01) {
+                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 1.0, 1.0), vPulse * 0.7);
+              }
+              if (uPlayX > -9000.0) {
+                 float playDist = abs(vPosX - uPlayX);
+                 float playGlow = smoothstep(uPlayRange, 0.0, playDist);
+                 diffuseColor.rgb += vec3(1.0, 1.0, 1.0) * playGlow;
+                 diffuseColor.a = max(diffuseColor.a, playGlow);
+              }
+              `
+      );
+    };
+
+    const mesh = new THREE.Points(geometry, pointMaterial);
+    mesh.renderOrder = 20;
+    group.add(mesh);
+
+    this.buildLines(group);
+
+    return {
+      meshResult: group,
+      stats: {
+        nodes: positions.length / 3,
+        links: allIndices.length / 2,
+        layers: 2
+      }
+    }
+  }
+
+  toggleAudio() {
+    if (!this.audioCtx) return false;
+    if (this.isPlaying) {
+      this.pauseAudio();
+    } else {
+      this.playAudio();
+    }
+    return this.isPlaying;
+  }
+
+  playAudio() {
+    if (this.isPlaying || !this.audioCtx) return;
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
+
+    this.audioSource = this.audioCtx.createBufferSource();
+    this.audioSource.buffer = this.audioBuffer;
+    this.audioSource.connect(this.audioCtx.destination);
+
+    const offset = this.audioPauseTime;
+    this.audioSource.start(0, offset);
+    this.audioStartTime = this.audioCtx.currentTime - offset;
+    this.isPlaying = true;
+  }
+
+  pauseAudio() {
+    if (!this.isPlaying) return;
+    try { this.audioSource.stop(); } catch (e) { }
+    this.audioPauseTime = this.audioCtx.currentTime - this.audioStartTime;
+    this.isPlaying = false;
+  }
+
+  stopAudio() {
+    if (this.isPlaying) {
+      try { this.audioSource.stop(); } catch (e) { }
+      this.isPlaying = false;
+    }
+    this.audioPauseTime = 0;
+    this.customUniforms.uPlayX.value = -9999.0;
+  }
+
+  getAudioProgress() {
+    if (!this.audioBuffer) return 0;
+    let duration = this.audioDuration || 1;
+    let t;
+    if (this.isPlaying) t = this.audioCtx.currentTime - this.audioStartTime;
+    else t = this.audioPauseTime;
+
+    if (t > duration) {
+      t = duration;
+      if (this.isPlaying) this.stopAudio();
+    }
+    return Math.max(0, Math.min(1.0, t / duration));
   }
 }
 

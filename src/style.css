@@ -1634,3 +1634,47 @@ input[type=range]::-moz-range-thumb {
 .accordion-content input[type="range"] {
     height: 14px;
 }
+/* Audio Controls */
+.audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-right: 20px;
+    padding-right: 20px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.audio-controls.hidden {
+    display: none;
+}
+
+.audio-track {
+    width: 200px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    position: relative;
+    border-radius: 2px;
+}
+
+.audio-progress-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: var(--color-primary);
+    width: 0%;
+    transition: width 0.1s linear;
+    box-shadow: 0 0 5px var(--color-primary);
+}
+
+#audio-time {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--color-primary);
+}
+
+.cyber-btn.mini {
+    padding: 6px 12px;
+    font-size: 0.7rem;
+    min-width: 60px;
+}
