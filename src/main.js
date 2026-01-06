@@ -1,5 +1,7 @@
 import { LightCycleArena } from './easterEgg.js';
 import * as THREE from 'three';
+import decodeAudio from 'audio-decode';
+import { PhysicsWorld } from './physics.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 
@@ -70,6 +72,7 @@ export class CrystalViewer {
       uNodeOpacity: { value: 1.0 },
       uInvertInfluence: { value: 1.0 },
       uNodeSaturation: { value: 0.5 },
+      uAudioLevel: { value: 0.0 }, // [NEW] Real-time audio level
       uPalette: { value: Array(6).fill(0).map(() => new THREE.Color(0xffffff)) }
     };
 
@@ -89,8 +92,13 @@ export class CrystalViewer {
       uNodeOpacity: 1.0,
       uInvertInfluence: 1.0,
       uNodeSaturation: 0.5,
+      uNodeSaturation: 0.5,
       uPalette: Array(6).fill(0).map(() => new THREE.Color(0xffffff))
     };
+
+    // Physics
+    this.physics = new PhysicsWorld(50, 20); // Length 50 matches approx track length, 20 nodes
+    this.customUniforms.uSpine = { value: this.physics.spinePositions };
 
     this.palettes = {
       classic: ['#ff0000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff'],
@@ -197,6 +205,7 @@ export class CrystalViewer {
     this.resizeObserver.observe(this.container);
 
     // Start Loop
+    this.clock = new THREE.Clock();
     this.animate();
   }
 
@@ -367,7 +376,40 @@ export class CrystalViewer {
     this.customUniforms.uLineOpacity.value = lerp(this.customUniforms.uLineOpacity.value, this.targetUniforms.uLineOpacity);
     this.customUniforms.uNodeOpacity.value = lerp(this.customUniforms.uNodeOpacity.value, this.targetUniforms.uNodeOpacity);
     this.customUniforms.uInvertInfluence.value = lerp(this.customUniforms.uInvertInfluence.value, this.targetUniforms.uInvertInfluence);
+    this.customUniforms.uNodeOpacity.value = lerp(this.customUniforms.uNodeOpacity.value, this.targetUniforms.uNodeOpacity);
+    this.customUniforms.uInvertInfluence.value = lerp(this.customUniforms.uInvertInfluence.value, this.targetUniforms.uInvertInfluence);
     this.customUniforms.uNodeSaturation.value = lerp(this.customUniforms.uNodeSaturation.value, this.targetUniforms.uNodeSaturation);
+
+    // Audio Level Logic
+    let currentLevel = 0;
+    if (this.isPlaying && this.audioBuffer && this.analyserNode && this.audioCtx) {
+      // Get real-time data from analyser
+      const dataArray = new Uint8Array(this.analyserNode.frequencyBinCount);
+      this.analyserNode.getByteTimeDomainData(dataArray);
+
+      // Calculate RMS
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const v = (dataArray[i] - 128) / 128; // Normalize to -1..1
+        sum += v * v;
+      }
+      currentLevel = Math.sqrt(sum / dataArray.length);
+    }
+    // Smooth decay for visual niceness
+    // Note: we need to initialize this.targetAudioLevel if we want smooth lerp, 
+    // but direct set with simple smoothing is fine for jitter
+    const prevLevel = this.customUniforms.uAudioLevel.value;
+    if (currentLevel > prevLevel) {
+      this.customUniforms.uAudioLevel.value = lerp(prevLevel, currentLevel, 0.5); // Attack fast
+    } else {
+      this.customUniforms.uAudioLevel.value = lerp(prevLevel, currentLevel, 0.1); // Decay slow
+    }
+
+    // Apply Force to Physics Spine
+    if (this.customUniforms.uAudioLevel.value > 0.01) {
+      if (Math.random() > 0.99) console.log("Physics Force Applying. Level:", this.customUniforms.uAudioLevel.value);
+      this.physics.applyAudioForce(this.customUniforms.uAudioLevel.value, this.customUniforms.uPlayX.value);
+    }
 
     for (let i = 0; i < 6; i++) {
       this.customUniforms.uPalette.value[i].lerp(this.targetUniforms.uPalette[i], 0.1);
@@ -433,6 +475,21 @@ export class CrystalViewer {
       this.camera.position.y += deltaY;
       this.controls.target.y += deltaY;
     }
+
+    const dt = this.clock.getDelta();
+    const time = this.clock.getElapsedTime();
+
+    this.customUniforms.uTime.value = time;
+
+    // Update Physics
+    this.physics.update(dt);
+    this.customUniforms.uSpine.value = this.physics.spinePositions;
+    // Sync Uniform (Three.js needs to know array changed?)
+    // Actually Float32Array in uniform value is usually by reference, 
+    // but we might need to toggle needsUpdate if it was a Texture. 
+    // For uniform array of vec3, standard WebGLRenderer handles it if the value ref is same? 
+    // usually yes.
+    // usually yes.
 
     if (this.controls && this.autoRotate) {
       this.controls.autoRotate = true;
@@ -553,6 +610,8 @@ export class CrystalViewer {
       shader.uniforms.uPalette = this.customUniforms.uPalette;
       shader.uniforms.uPlayX = this.customUniforms.uPlayX;
       shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
+      shader.uniforms.uAudioLevel = this.customUniforms.uAudioLevel;
+      shader.uniforms.uSpine = this.customUniforms.uSpine;
 
       shader.vertexShader = `
           varying float vPulse;
@@ -563,6 +622,83 @@ export class CrystalViewer {
           uniform float uPulseEnabled;
           uniform float uNodeNear;
           uniform float uNodeFar;
+          uniform float uAudioLevel;
+          uniform float uPlayX;
+          uniform vec3 uSpine[20];
+
+          // Simplex 3D Noise 
+          vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+          vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+          vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+          vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+          
+          float snoise(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+            const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i  = floor(v + dot(v, C.yyy));
+            vec3 x0 = v - dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz);
+            vec3 l = 1.0 - g;
+            vec3 i1 = min( g.xyz, l.zxy );
+            vec3 i2 = max( g.xyz, l.zxy );
+            vec3 x1 = x0 - i1 + C.xxx;
+            vec3 x2 = x0 - i2 + C.yyy;
+            vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute( permute( permute( 
+                      i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                    + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
+                    + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+            float n_ = 0.142857142857;
+            vec3  ns = n_ * D.wyz - D.xzx;
+            vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+            vec4 x_ = floor(j * ns.z);
+            vec4 y_ = floor(j - 7.0 * x_ );
+            vec4 x = x_ *ns.x + ns.yyyy;
+            vec4 y = y_ *ns.x + ns.yyyy;
+            vec4 h = 1.0 - abs(x) - abs(y);
+            vec4 b0 = vec4( x.xy, y.xy );
+            vec4 b1 = vec4( x.zw, y.zw );
+            vec4 s0 = floor(b0)*2.0 + 1.0;
+            vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+            vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+            vec3 p0 = vec3(a0.xy,h.x);
+            vec3 p1 = vec3(a0.zw,h.y);
+            vec3 p2 = vec3(a1.xy,h.z);
+            vec3 p3 = vec3(a1.zw,h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+            p0 *= norm.x;
+            p1 *= norm.y;
+            p2 *= norm.z;
+            p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m;
+            return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), 
+                                          dot(p2,x2), dot(p3,x3) ) );
+          }
+
+          vec3 getSoupOffset(vec3 pos, float time) {
+              float noise = snoise(pos * 2.0 + time * 0.5);
+              float noise2 = snoise(pos * 2.0 + time * 0.5 + 100.0);
+              float noise3 = snoise(pos * 2.0 + time * 0.5 + 200.0);
+              return vec3(noise, noise2, noise3) * 3.0;
+          }
+          
+          vec3 getSpineOffset(float x) {
+              float stepSize = 50.0 / 19.0;
+              float idx = (x + 25.0) / stepSize;
+              int i = int(idx);
+              float f = fract(idx);
+              if (i < 0) return vec3(0.0); // Now only for x < -25
+              if (i >= 19) return uSpine[19] - vec3(25.0, 0.0, 0.0); // Max end at 25
+              vec3 p0 = uSpine[i];
+              vec3 p1 = uSpine[i+1];
+              vec3 currentPos = mix(p0, p1, f);
+              vec3 originalPos = vec3(x, 0.0, 0.0);
+              return currentPos - originalPos;
+          }
         ` + shader.vertexShader;
 
       shader.vertexShader = shader.vertexShader.replace(
@@ -575,22 +711,37 @@ export class CrystalViewer {
              float wave = sin(position.z * 0.2 + uTime * 2.5 + offset * 0.5);
              vPulse = smoothstep(0.9, 1.0, wave);
           }
+
+          // Audio Bounce Physics
+          if (uAudioLevel > 0.01 && uPlayX > -9000.0) {
+             float dist = abs(position.x - uPlayX);
+             float influence = smoothstep(3.0, 0.0, dist);
+             vec3 radial = vec3(0.0, position.y, position.z);
+             float rLen = length(radial);
+             if (rLen > 0.001) radial = normalize(radial);
+             else radial = vec3(0.0, 1.0, 0.0);
+             transformed += radial * uAudioLevel * influence * 8.0; 
+          }
           `
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <project_vertex>',
         `
-        #include <project_vertex>
+        // transformed is already defined
+        transformed += getSoupOffset(position, uTime);
+        transformed += getSpineOffset(transformed.x);
+
+        vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
+        gl_Position = projectionMatrix * mvPosition;
+
         float dist = length(mvPosition.xyz);
         vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
         vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
         vPosX = position.x;
         
-        // Scale point size based on distance from center
-        // Nodes at center are 0.2x size, outer nodes are 1.0x size
         float distFromCenter = length(position.xyz);
-        float maxDist = 15.0; // Approximate max distance in the crystal
+        float maxDist = 15.0; 
         float sizeScale = mix(0.2, 1.0, smoothstep(0.0, maxDist * 0.5, distFromCenter));
         gl_PointSize *= sizeScale;
         `
@@ -748,6 +899,8 @@ export class CrystalViewer {
       shader.uniforms.uPalette = this.customUniforms.uPalette;
       shader.uniforms.uPlayX = this.customUniforms.uPlayX;
       shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
+      shader.uniforms.uSpine = this.customUniforms.uSpine;
+      shader.uniforms.uAudioLevel = this.customUniforms.uAudioLevel;
 
       shader.vertexShader = `
         attribute float aLineSeed;
@@ -757,12 +910,113 @@ export class CrystalViewer {
         varying float vPosX;
         uniform float uLineNear;
         uniform float uLineFar;
+        uniform float uAudioLevel;
+        uniform float uPlayX;
+        uniform float uTime;
+        uniform vec3 uSpine[20];
+
+        // Simplex 3D Noise 
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        float snoise(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+            const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i  = floor(v + dot(v, C.yyy));
+            vec3 x0 = v - dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz);
+            vec3 l = 1.0 - g;
+            vec3 i1 = min( g.xyz, l.zxy );
+            vec3 i2 = max( g.xyz, l.zxy );
+            vec3 x1 = x0 - i1 + C.xxx;
+            vec3 x2 = x0 - i2 + C.yyy;
+            vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute( permute( permute( 
+                        i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                    + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
+                    + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+            float n_ = 0.142857142857;
+            vec3  ns = n_ * D.wyz - D.xzx;
+            vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+            vec4 x_ = floor(j * ns.z);
+            vec4 y_ = floor(j - 7.0 * x_ );
+            vec4 x = x_ *ns.x + ns.yyyy;
+            vec4 y = y_ *ns.x + ns.yyyy;
+            vec4 h = 1.0 - abs(x) - abs(y);
+            vec4 b0 = vec4( x.xy, y.xy );
+            vec4 b1 = vec4( x.zw, y.zw );
+            vec4 s0 = floor(b0)*2.0 + 1.0;
+            vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+            vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+            vec3 p0 = vec3(a0.xy,h.x);
+            vec3 p1 = vec3(a0.zw,h.y);
+            vec3 p2 = vec3(a1.xy,h.z);
+            vec3 p3 = vec3(a1.zw,h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+            p0 *= norm.x;
+            p1 *= norm.y;
+            p2 *= norm.z;
+            p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m;
+            return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), 
+                                            dot(p2,x2), dot(p3,x3) ) );
+        }
+
+        vec3 getSoupOffset(vec3 pos, float time) {
+            float noise = snoise(pos * 2.0 + time * 0.5);
+            float noise2 = snoise(pos * 2.0 + time * 0.5 + 100.0);
+            float noise3 = snoise(pos * 2.0 + time * 0.5 + 200.0);
+            return vec3(noise, noise2, noise3) * 3.0;
+        }
+
+        vec3 getSpineOffset(float x) {
+          float stepSize = 50.0 / 19.0;
+          float idx = (x + 25.0) / stepSize;
+          int i = int(idx);
+          float f = fract(idx);
+          if (i < 0) return vec3(0.0);
+          if (i >= 19) return uSpine[19] - vec3(25.0, 0.0, 0.0);
+          vec3 p0 = uSpine[i];
+          vec3 p1 = uSpine[i+1];
+          vec3 currentPos = mix(p0, p1, f);
+          vec3 originalPos = vec3(x, 0.0, 0.0);
+          return currentPos - originalPos;
+         }
+
       ` + shader.vertexShader;
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <project_vertex>',
         `
-        #include <project_vertex>
+        // transformed is already defined (vec3 transformed = vec3(position))
+        
+        // 1. Add Soup
+        transformed += getSoupOffset(position, uTime);
+
+        // 2. Add Spine
+        transformed += getSpineOffset(transformed.x);
+
+         // Audio Bounce Physics (Lines)
+        if (uAudioLevel > 0.01 && uPlayX > -9000.0) {
+            float dist = abs(position.x - uPlayX);
+            float influence = smoothstep(3.0, 0.0, dist);
+            
+            vec3 radial = vec3(0.0, position.y, position.z);
+            float rLen = length(radial);
+            if (rLen > 0.001) radial = normalize(radial);
+            else radial = vec3(0.0, 1.0, 0.0);
+
+            transformed += radial * uAudioLevel * influence * 8.0;
+        }
+        
+        vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
+        gl_Position = projectionMatrix * mvPosition;
+
         float dist = length(mvPosition.xyz);
         vDistAlpha = 1.0 - smoothstep(uLineNear, uLineFar, dist);
         vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
@@ -884,6 +1138,8 @@ export class CrystalViewer {
       shader.uniforms.uInvertInfluence = this.customUniforms.uInvertInfluence;
       shader.uniforms.uPalette = this.customUniforms.uPalette;
       shader.uniforms.uInvertInfluence = this.customUniforms.uInvertInfluence;
+      shader.uniforms.uSpine = this.customUniforms.uSpine;
+      shader.uniforms.uAudioLevel = this.customUniforms.uAudioLevel;
 
       shader.vertexShader = `
         attribute float aLineSeed;
@@ -891,12 +1147,112 @@ export class CrystalViewer {
         varying float vLineSeed;
         uniform float uLineNear;
         uniform float uLineFar;
+        uniform float uAudioLevel;
+        uniform float uPlayX;
+        uniform float uTime;
+        uniform vec3 uSpine[20];
+        
+        // Simplex 3D Noise 
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        float snoise(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+            const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i  = floor(v + dot(v, C.yyy));
+            vec3 x0 = v - dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz);
+            vec3 l = 1.0 - g;
+            vec3 i1 = min( g.xyz, l.zxy );
+            vec3 i2 = max( g.xyz, l.zxy );
+            vec3 x1 = x0 - i1 + C.xxx;
+            vec3 x2 = x0 - i2 + C.yyy;
+            vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute( permute( permute( 
+                        i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                    + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
+                    + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+            float n_ = 0.142857142857;
+            vec3  ns = n_ * D.wyz - D.xzx;
+            vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+            vec4 x_ = floor(j * ns.z);
+            vec4 y_ = floor(j - 7.0 * x_ );
+            vec4 x = x_ *ns.x + ns.yyyy;
+            vec4 y = y_ *ns.x + ns.yyyy;
+            vec4 h = 1.0 - abs(x) - abs(y);
+            vec4 b0 = vec4( x.xy, y.xy );
+            vec4 b1 = vec4( x.zw, y.zw );
+            vec4 s0 = floor(b0)*2.0 + 1.0;
+            vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+            vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+            vec3 p0 = vec3(a0.xy,h.x);
+            vec3 p1 = vec3(a0.zw,h.y);
+            vec3 p2 = vec3(a1.xy,h.z);
+            vec3 p3 = vec3(a1.zw,h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+            p0 *= norm.x;
+            p1 *= norm.y;
+            p2 *= norm.z;
+            p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m;
+            return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), 
+                                            dot(p2,x2), dot(p3,x3) ) );
+        }
+        
+        vec3 getSoupOffset(vec3 pos, float time) {
+            float noise = snoise(pos * 2.0 + time * 0.5);
+            float noise2 = snoise(pos * 2.0 + time * 0.5 + 100.0);
+            float noise3 = snoise(pos * 2.0 + time * 0.5 + 200.0);
+            return vec3(noise, noise2, noise3) * 3.0;
+        }
+
+        vec3 getSpineOffset(float x) {
+          float stepSize = 50.0 / 19.0;
+          float idx = (x + 25.0) / stepSize;
+          int i = int(idx);
+          float f = fract(idx);
+          if (i < 0) return vec3(0.0);
+          if (i >= 19) return uSpine[19] - vec3(25.0, 0.0, 0.0);
+          vec3 p0 = uSpine[i];
+          vec3 p1 = uSpine[i+1];
+          vec3 currentPos = mix(p0, p1, f);
+          vec3 originalPos = vec3(x, 0.0, 0.0);
+          return currentPos - originalPos;
+         }
       ` + shader.vertexShader;
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <project_vertex>',
         `
-        #include <project_vertex>
+        // transformed is already defined
+        
+        // 1. Add Soup
+        transformed += getSoupOffset(position, uTime);
+
+        // 2. Add Spine
+        transformed += getSpineOffset(transformed.x);
+        
+        // Audio Bounce Physics (Lines)
+        if (uAudioLevel > 0.01 && uPlayX > -9000.0) {
+            float dist = abs(position.x - uPlayX);
+            float influence = smoothstep(3.0, 0.0, dist);
+            
+            vec3 radial = vec3(0.0, position.y, position.z);
+            float rLen = length(radial);
+            if (rLen > 0.001) radial = normalize(radial);
+            else radial = vec3(0.0, 1.0, 0.0);
+
+            transformed += radial * uAudioLevel * influence * 8.0;
+        }
+
+        vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
+        gl_Position = projectionMatrix * mvPosition;
+
         float dist = length(mvPosition.xyz);
         vDistAlpha = 1.0 - smoothstep(uLineNear, uLineFar, dist);
         vLineSeed = aLineSeed;
@@ -1094,7 +1450,7 @@ export class CrystalViewer {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    this.audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
+    this.audioBuffer = await decodeAudio(arrayBuffer);
     this.audioDuration = this.audioBuffer.duration;
 
     const { meshResult, stats } = this.parseAudio(this.audioBuffer);
@@ -1123,85 +1479,121 @@ export class CrystalViewer {
 
     const timeScale = 0.025;
     const ampScale = 20.0;
-    const baseRadius = 0.05;
+    const baseRadius = 0.08;
     const segments = 8; // Octagonal rings
 
     let previousRingStartRaw = -1;
+    let lpValL = 0;
+    let lpValR = 0;
 
-    for (let i = 0; i < totalSamples; i += step) {
-      if (i + step >= totalSamples) break;
+    // New Filter Logic: Run filter on a tighter stride to capture ~400Hz properly
+    // Audio rate ~44-48kHz. Stride 10 => ~4.4kHz effective rate.
+    // Cutoff ~400Hz. RC Time constant logic... roughly alpha ~ 0.45 for this ratio.
+    const filterStride = 10;
+    const alpha = 0.45;
+    let nextVizIndex = 0; // When to generate the next ring
 
-      const x = (i / step) * timeScale;
-      // Index of the first vertex in THIS ring
-      const ringStart = positions.length / 3;
+    for (let i = 0; i < totalSamples; i += filterStride) {
+      if (i >= totalSamples) break;
 
-      // Random rotation for this ring to prevent alignment
-      const ringRotation = Math.random() * Math.PI * 2;
+      // 1. Run Filter on every stride step
+      const rawL = dataL[i] || 0;
+      const rawR = dataR[i] || 0;
+      lpValL += alpha * (rawL - lpValL);
+      lpValR += alpha * (rawR - lpValR);
 
-      for (let s = 0; s < segments; s++) {
-        const baseAngle = (s / segments) * Math.PI * 2;
-        const angle = baseAngle + ringRotation;
+      // 2. Visualization Trigger
+      if (i >= nextVizIndex) {
+        nextVizIndex += step; // Advance target
 
-        // Map angle to channel: Top/Right (0..PI) uses Right, Bottom/Left (PI..2PI) uses Left
-        // Use baseAngle for channel mapping to modify consistent sides even with rotation
-        // Actually, let's mix it up - rotating the mapping creates more chaos which might be good
-        // But user asked for dynamics - consistent mapping might be better for structure.
-        // Let's stick to simple angle for now.
-        const isRight = (s < segments / 2); // Simple half-split based on index
-        let amp = isRight ? dataR[i] : dataL[i];
+        // Capture State
+        let bass = (lpValL + lpValR) * 0.5;
+        let treble = ((rawL - lpValL) + (rawR - lpValR)) * 0.5;
 
-        // Rectify amplitude for radius addition
-        amp = Math.abs(amp);
+        // Rectify
+        let bassAmp = Math.abs(bass);
+        let trebleAmp = Math.abs(treble);
 
-        // "Spiky" noise component - increase noise for more jagged look
-        const spike = Math.random() * 0.6;
-        const radius = baseRadius + (amp * ampScale) + spike;
+        const x = (i / totalSamples) * (totalSamples / step) * timeScale;
+        const ringStart = positions.length / 3;
+        const ringRotation = Math.random() * Math.PI * 2;
 
-        // Jitter for organic messiness - increased
-        const jX = (Math.random() - 0.5) * 0.2;
-        const jY = (Math.random() - 0.5) * 0.2;
-        const jZ = (Math.random() - 0.5) * 0.2;
-
-        // Convert Polar to Cartesian (YZ plane)
-        const y = Math.sin(angle) * radius;
-        const z = Math.cos(angle) * radius;
-
-        positions.push(x + jX, y + jY, z + jZ);
-
-        // Color based on time and angle
-        const hue = ((x * 0.02) + (angle / (Math.PI * 2))) % 1.0;
-        const color = new THREE.Color().setHSL(hue, 1.0, 0.5);
-        colors.push(color.r, color.g, color.b);
-      }
-
-      // Connect to previous ring
-      if (previousRingStartRaw >= 0) {
         for (let s = 0; s < segments; s++) {
-          const currentIdx = ringStart + s;
-          const prevIdx = previousRingStartRaw + s;
+          const baseAngle = (s / segments) * Math.PI * 2;
+          const angle = baseAngle + ringRotation;
+          const sinV = Math.sin(angle); // -1 (Bottom) to +1 (Top)
 
-          const nextSeg = (s + 1) % segments;
-          const currentNextIdx = ringStart + nextSeg;
-          const prevNextIdx = previousRingStartRaw + nextSeg;
+          let targetAmp = 0;
+          let extraSpike = 0;
+          let isBassRegion = false;
 
-          // 1. Longitudinal Rail (connects 'straight' back in time)
-          allIndices.push(prevIdx, currentIdx);
-
-          // 2. Radial Rib (connects to neighbor in same ring)
-          allIndices.push(currentIdx, currentNextIdx);
-
-          // 3. Cross/Diagonal (Webbing)
-          // Add random diagonal cross-bracing for "tunnel web" look
-          if (Math.random() > 0.4) {
-            allIndices.push(prevIdx, currentNextIdx);
+          if (sinV < -0.2) {
+            // Bottom: "Blue Pea" / Bloopy Bass
+            // Smooth shape, large amplitude
+            targetAmp = bassAmp * 12.0;
+            // Add a minimum "pea" size so it's always visible
+            if (targetAmp < 0.05) targetAmp = 0.05;
+            isBassRegion = true;
+          } else if (sinV > 0.2) {
+            // Top: Sharp Treble
+            targetAmp = trebleAmp * 12.0;
+            if (trebleAmp > 0.02) {
+              extraSpike = Math.random() * trebleAmp * 8.0;
+            }
+          } else {
+            // Middle blend
+            targetAmp = (bassAmp + trebleAmp) * 3.0;
           }
-          if (Math.random() > 0.4) {
-            allIndices.push(prevNextIdx, currentIdx);
+
+          // Reduce noise on bass to keep it "bloopy"
+          const noiseAmount = isBassRegion ? 0.02 : 0.15;
+          const noise = (Math.random() * noiseAmount);
+
+          const radius = baseRadius + targetAmp + noise + extraSpike;
+
+          // Coordinates
+          const jAmount = 0.05; // Less jitter overall
+          const jX = (Math.random() - 0.5) * jAmount;
+          const jY = (Math.random() - 0.5) * jAmount;
+          const jZ = (Math.random() - 0.5) * jAmount;
+
+          const y = Math.sin(angle) * radius;
+          const z = Math.cos(angle) * radius;
+
+          positions.push(x + jX, y + jY, z + jZ);
+
+          // COLOR LOGIC
+          // Blue Pea => Bottom is Blue/Cyan
+          if (isBassRegion) {
+            // Deep Blue / Cyan for bass
+            // H: 0.5 (Cyan) - 0.65 (Blue)
+            const bHue = 0.5 + (bassAmp * 0.2);
+            colors.push(0.1, 0.5 + bassAmp * 5.0, 1.0); // Boost Blue channel
+          } else {
+            // Top / Standard
+            const hue = ((x * 0.05) + (angle / (Math.PI * 2))) % 1.0;
+            const color = new THREE.Color().setHSL(hue, 1.0, 0.5);
+            colors.push(color.r, color.g, color.b);
           }
         }
-      }
 
-      previousRingStartRaw = ringStart;
+        // Connectivity Logic (Same as before)
+        if (previousRingStartRaw >= 0) {
+          for (let s = 0; s < segments; s++) {
+            const currentIdx = ringStart + s;
+            const prevIdx = previousRingStartRaw + s;
+            const nextSeg = (s + 1) % segments;
+            const currentNextIdx = ringStart + nextSeg;
+            const prevNextIdx = previousRingStartRaw + nextSeg;
+
+            allIndices.push(prevIdx, currentIdx);
+            allIndices.push(currentIdx, currentNextIdx);
+            if (Math.random() > 0.4) allIndices.push(prevIdx, currentNextIdx);
+            if (Math.random() > 0.4) allIndices.push(prevNextIdx, currentIdx);
+          }
+        }
+        previousRingStartRaw = ringStart;
+      }
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -1244,17 +1636,103 @@ export class CrystalViewer {
       shader.uniforms.uPalette = this.customUniforms.uPalette;
       shader.uniforms.uPlayX = this.customUniforms.uPlayX;
       shader.uniforms.uPlayRange = this.customUniforms.uPlayRange;
+      shader.uniforms.uAudioLevel = this.customUniforms.uAudioLevel;
+      shader.uniforms.uSpine = this.customUniforms.uSpine;
 
       shader.vertexShader = `
-                varying float vPulse;
-                varying float vDistAlpha;
-                varying float vSeed;
-                varying float vPosX;
-                uniform float uTime;
-                uniform float uPulseEnabled;
-                uniform float uNodeNear;
-                uniform float uNodeFar;
-              ` + shader.vertexShader;
+      varying float vAlpha;
+      varying float vPosX;
+      varying float vPulse;
+      varying float vDistAlpha;
+      varying float vSeed;
+
+      uniform float uTime;
+      uniform float uNodeNear;
+      uniform float uNodeFar;
+      uniform float uNodeDensity;
+      uniform float uNodeSaturation;
+      uniform float uNodeOpacity;
+      uniform float uPulseEnabled;
+      uniform float uAudioLevel;
+      uniform float uPlayX;
+      uniform float uPlayRange;
+      uniform vec3 uPalette[6];
+      uniform vec3 uSpine[20];
+      
+      // Simplex 3D Noise 
+      vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+      vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+      vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+      
+      float snoise(vec3 v) {
+        const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+        const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+        vec3 i  = floor(v + dot(v, C.yyy));
+        vec3 x0 = v - dot(i, C.xxx);
+        vec3 g = step(x0.yzx, x0.xyz);
+        vec3 l = 1.0 - g;
+        vec3 i1 = min( g.xyz, l.zxy );
+        vec3 i2 = max( g.xyz, l.zxy );
+        vec3 x1 = x0 - i1 + C.xxx;
+        vec3 x2 = x0 - i2 + C.yyy;
+        vec3 x3 = x0 - D.yyy;
+        i = mod289(i);
+        vec4 p = permute( permute( permute( 
+                  i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
+                + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+        float n_ = 0.142857142857;
+        vec3  ns = n_ * D.wyz - D.xzx;
+        vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+        vec4 x_ = floor(j * ns.z);
+        vec4 y_ = floor(j - 7.0 * x_ );
+        vec4 x = x_ *ns.x + ns.yyyy;
+        vec4 y = y_ *ns.x + ns.yyyy;
+        vec4 h = 1.0 - abs(x) - abs(y);
+        vec4 b0 = vec4( x.xy, y.xy );
+        vec4 b1 = vec4( x.zw, y.zw );
+        vec4 s0 = floor(b0)*2.0 + 1.0;
+        vec4 s1 = floor(b1)*2.0 + 1.0;
+        vec4 sh = -step(h, vec4(0.0));
+        vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+        vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+        vec3 p0 = vec3(a0.xy,h.x);
+        vec3 p1 = vec3(a0.zw,h.y);
+        vec3 p2 = vec3(a1.xy,h.z);
+        vec3 p3 = vec3(a1.zw,h.w);
+        vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+        p0 *= norm.x;
+        p1 *= norm.y;
+        p2 *= norm.z;
+        p3 *= norm.w;
+        vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+        m = m * m;
+        return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), 
+                                      dot(p2,x2), dot(p3,x3) ) );
+      }
+
+      vec3 getSoupOffset(vec3 pos, float time) {
+          float noise = snoise(pos * 2.0 + time * 0.5);
+          float noise2 = snoise(pos * 2.0 + time * 0.5 + 100.0);
+          float noise3 = snoise(pos * 2.0 + time * 0.5 + 200.0);
+          return vec3(noise, noise2, noise3) * 3.0;
+      }
+      
+      vec3 getSpineOffset(float x) {
+          float stepSize = 50.0 / 19.0;
+          float idx = (x + 25.0) / stepSize;
+          int i = int(idx);
+          float f = fract(idx);
+          if (i < 0) return vec3(0.0);
+          if (i >= 19) return uSpine[19] - vec3(25.0, 0.0, 0.0);
+          vec3 p0 = uSpine[i];
+          vec3 p1 = uSpine[i+1];
+          vec3 currentPos = mix(p0, p1, f);
+          vec3 originalPos = vec3(x, 0.0, 0.0);
+          return currentPos - originalPos;
+      }
+    ` + shader.vertexShader;
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
@@ -1266,17 +1744,61 @@ export class CrystalViewer {
                   float wave = sin(position.z * 0.2 + uTime * 2.5 + offset * 0.5);
                   vPulse = smoothstep(0.9, 1.0, wave);
                 }
+                
+                // Audio Bounce Physics
+                if (uAudioLevel > 0.01 && uPlayX > -9000.0) {
+                   float dist = abs(position.x - uPlayX);
+                   float influence = smoothstep(3.0, 0.0, dist); // Tight influence
+                   
+                   // Radial Expansion (Speaker Cone Effect)
+                   // Calculate direction away from center axis (X-axis)
+                   vec3 radial = vec3(0.0, position.y, position.z);
+                   float rLen = length(radial);
+                   if (rLen > 0.001) radial = normalize(radial);
+                   else radial = vec3(0.0, 1.0, 0.0);
+
+                   // Throb/Bounce
+                   // mix of radial expansion and a little bit of chaotic twist
+                   transformed += radial * uAudioLevel * influence * 8.0; 
+                }
                 `
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <project_vertex>',
         `
-              #include <project_vertex>
+        // transformed is already defined in begin_vertex
+      
+      // 1. Add "Soup" Float
+      transformed += getSoupOffset(position, uTime);
+      
+      // 2. Add Physics Spine Offset
+      vec3 spineOffset = getSpineOffset(transformed.x);
+      transformed += spineOffset;
+
+      // Audio Bounce Physics
+      if (uAudioLevel > 0.01 && uPlayX > -9000.0) {
+         float dist = abs(position.x - uPlayX);
+         float influence = smoothstep(3.0, 0.0, dist); // Tight influence
+         
+         // Radial Expansion (Speaker Cone Effect)
+         vec3 radial = vec3(0.0, position.y, position.z);
+         float rLen = length(radial);
+         if (rLen > 0.001) radial = normalize(radial);
+         else radial = vec3(0.0, 1.0, 0.0);
+
+         // Throb/Bounce
+         transformed += radial * uAudioLevel * influence * 8.0; 
+      }
+
+      vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
+      gl_Position = projectionMatrix * mvPosition;
+      
+      vPosX = position.x;
+      
               float dist = length(mvPosition.xyz);
               vDistAlpha = 1.0 - smoothstep(uNodeNear, uNodeFar, dist);
               vSeed = fract(sin(dot(position.xyz, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
-              vPosX = position.x;
               gl_PointSize *= mix(0.2, 1.0, smoothstep(0.0, 15.0 * 0.5, length(position.xyz)));
               `
       );
@@ -1383,7 +1905,11 @@ export class CrystalViewer {
 
     this.audioSource = this.audioCtx.createBufferSource();
     this.audioSource.buffer = this.audioBuffer;
-    this.audioSource.connect(this.gainNode);
+    this.analyserNode = this.audioCtx.createAnalyser(); // [NEW]
+    this.analyserNode.fftSize = 256;
+    this.audioSource.connect(this.analyserNode);
+    this.analyserNode.connect(this.gainNode);
+    // this.audioSource.connect(this.gainNode); // Removed direct connect
 
     const offset = this.audioPauseTime;
     this.audioSource.start(0, offset);

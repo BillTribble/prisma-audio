@@ -81,14 +81,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
-  // 2. Load Gallery
-  await loadGallery();
+  // 2. Setup Controls (Before loading data to catch events)
   setupControls();
 
-  // 3. Setup Search & Filters
+  // 3. Load Gallery (which triggers file upload event)
+  await loadGallery();
+
+  // 4. Setup Search & Filters
   setupSearch();
 
-  // 4. Setup Slot Selection
+  // 5. Setup Slot Selection
   panelA.addEventListener('click', () => setActiveSlot('main'));
   panelB.addEventListener('click', () => setActiveSlot('compare'));
 
@@ -104,6 +106,8 @@ const filterState = {
 
 function setupSearch() {
   const searchInput = document.getElementById('search-input');
+  if (!searchInput) return; // Guard clause
+
   searchInput.addEventListener('input', (e) => {
     filterState.query = e.target.value.toLowerCase();
     applyFilters();
@@ -201,9 +205,10 @@ function setActiveSlot(slot) {
 async function loadGallery() {
   // Gallery Disabled - Loading Default Audio
   try {
-    const res = await fetch('./default.wav');
+    const filename = "Bill Tribble - Crystal Temple Opening Ritual.flac";
+    const res = await fetch(filename);
     const blob = await res.blob();
-    const file = new File([blob], "default.wav", { type: "audio/wav" });
+    const file = new File([blob], filename, { type: "audio/flac" });
 
     // Simulate file upload
     const dataTransfer = new DataTransfer();
@@ -382,19 +387,7 @@ function setupControls() {
       // For now, faithfully applying the change as provided.
       infoVisible = !infoVisible;
       panels.forEach(p => p.style.opacity = infoVisible ? '1' : '0');
-      document.getElementById('btn-toggle-info').textContent = infoVisible ? 'HIDE INFO' : 'SHOW INFO';
-
-      setTimeout(() => {
-        if (mainViewer) mainViewer.onResize();
-        if (compareViewer) compareViewer.onResize();
-      }, 300);
     });
-
-    // Mobile Default: Hide Info
-    if (window.innerWidth < 900) {
-      document.querySelector('.ui-layer').classList.add('no-details');
-      btnToggleInfo.textContent = "SHOW INFO";
-    }
   }
 
   // About Modal Logic
@@ -839,7 +832,7 @@ if (fileInput) {
 
     // Determine type
     const ext = file.name.split('.').pop().toLowerCase();
-    const isAudio = ['mp3', 'wav', 'ogg'].includes(ext);
+    const isAudio = ['mp3', 'wav', 'ogg', 'flac'].includes(ext);
 
     if (isAudio) {
       console.log("Loading audio file:", file.name);
@@ -958,27 +951,29 @@ if (btnMobileMenu) {
 
 
 
-toggleCompare.addEventListener('change', (e) => {
-  isCompareMode = e.target.checked;
-  if (isCompareMode) {
-    viewCompare.classList.remove('hidden');
-    viewerContainer.classList.add('split');
-    panelB.classList.remove('hidden');
-    setActiveSlot('compare');
-    setTimeout(() => {
-      mainViewer.onResize();
-      compareViewer.onResize();
-    }, 550);
-  } else {
-    viewCompare.classList.add('hidden');
-    viewerContainer.classList.remove('split');
-    panelB.classList.add('hidden');
-    setActiveSlot('main');
-    setTimeout(() => {
-      mainViewer.onResize();
-    }, 550);
-  }
-});
+if (toggleCompare) {
+  toggleCompare.addEventListener('change', (e) => {
+    isCompareMode = e.target.checked;
+    if (isCompareMode) {
+      viewCompare.classList.remove('hidden');
+      viewerContainer.classList.add('split');
+      panelB.classList.remove('hidden');
+      setActiveSlot('compare');
+      setTimeout(() => {
+        mainViewer.onResize();
+        compareViewer.onResize();
+      }, 550);
+    } else {
+      viewCompare.classList.add('hidden');
+      viewerContainer.classList.remove('split');
+      panelB.classList.add('hidden');
+      setActiveSlot('main');
+      setTimeout(() => {
+        mainViewer.onResize();
+      }, 550);
+    }
+  });
+}
 
 // Toast Helper
 function showToast(msg, isAlert = false) {
