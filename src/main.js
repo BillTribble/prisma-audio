@@ -147,7 +147,9 @@ export class CrystalViewer {
     this.audioCtx = null;
     this.audioBuffer = null;
     this.audioSource = null;
+    this.gainNode = null;
     this.isPlaying = false;
+    this.isMuted = false;
     this.audioStartTime = 0; // When playback started relative to AudioContext.currentTime
     this.audioPauseTime = 0; // How far into the track we were when paused
     this.audioDuration = 0;
@@ -1085,7 +1087,11 @@ export class CrystalViewer {
     }
     this.stopAudio();
 
-    if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!this.audioCtx) {
+      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      this.gainNode = this.audioCtx.createGain();
+      this.gainNode.connect(this.audioCtx.destination);
+    }
 
     const arrayBuffer = await file.arrayBuffer();
     this.audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
@@ -1333,7 +1339,7 @@ export class CrystalViewer {
 
     this.audioSource = this.audioCtx.createBufferSource();
     this.audioSource.buffer = this.audioBuffer;
-    this.audioSource.connect(this.audioCtx.destination);
+    this.audioSource.connect(this.gainNode);
 
     const offset = this.audioPauseTime;
     this.audioSource.start(0, offset);
@@ -1369,6 +1375,13 @@ export class CrystalViewer {
       if (this.isPlaying) this.stopAudio();
     }
     return Math.max(0, Math.min(1.0, t / duration));
+  }
+
+  toggleMute() {
+    if (!this.gainNode) return false;
+    this.isMuted = !this.isMuted;
+    this.gainNode.gain.setValueAtTime(this.isMuted ? 0 : 1, this.audioCtx.currentTime);
+    return this.isMuted;
   }
 }
 

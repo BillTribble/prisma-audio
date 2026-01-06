@@ -903,6 +903,18 @@ if (fileInput) {
 
 // Audio Controls
 const btnAudioPlay = document.getElementById('btn-audio-play');
+const btnAudioMute = document.getElementById('btn-audio-mute');
+
+if (btnAudioMute) {
+  btnAudioMute.addEventListener('click', () => {
+    if (mainViewer) {
+      const isMuted = mainViewer.toggleMute();
+      btnAudioMute.textContent = isMuted ? "UNMUTE" : "MUTE";
+      btnAudioMute.classList.toggle('active', isMuted);
+    }
+  });
+}
+
 if (btnAudioPlay) {
   btnAudioPlay.addEventListener('click', () => {
     if (mainViewer) {
